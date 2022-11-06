@@ -3,6 +3,7 @@ package com.acsbendi.requestinspectorwebview
 import android.util.Log
 import android.webkit.JavascriptInterface
 import android.webkit.WebView
+import com.renegade.applelogin.util.Const
 import org.intellij.lang.annotations.Language
 import org.json.JSONArray
 import org.json.JSONObject
@@ -64,9 +65,10 @@ internal class RequestInspectorJavaScriptInterface(webView: WebView) {
         }
 
         Log.i(LOG_TAG, "Recorded form submission from JavaScript")
-        if (url.endsWith("/redirect")) {
+//        if (url.endsWith("/redirect")) {
+//        if (url.startsWith(Const.REDIRECT_URI)) {
             recordedRequest = RecordedRequest(WebViewRequestType.FORM, url, method, body, headerMap, trace, enctype)
-        }
+//        }
 
         recordedRequests.add(
             RecordedRequest(WebViewRequestType.FORM, url, method, body, headerMap, trace, enctype)
