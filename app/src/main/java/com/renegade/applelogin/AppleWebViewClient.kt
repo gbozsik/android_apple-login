@@ -3,34 +3,32 @@ package com.renegade.applelogin
 import android.app.Dialog
 import android.content.ContentValues.TAG
 import android.graphics.Bitmap
+import android.graphics.Color
 import android.graphics.Rect
 import android.net.Uri
 import android.os.Build
 import android.util.Log
 import android.webkit.WebResourceResponse
 import android.webkit.WebView
+import android.widget.TextView
 import androidx.annotation.RequiresApi
 import com.acsbendi.requestinspectorwebview.RequestInspectorWebViewClient
 import com.acsbendi.requestinspectorwebview.WebViewRequest
-import com.google.firebase.crashlytics.buildtools.reloc.org.apache.http.NameValuePair
-import com.google.firebase.crashlytics.buildtools.reloc.org.apache.http.client.entity.UrlEncodedFormEntity
-import com.google.firebase.crashlytics.buildtools.reloc.org.apache.http.client.methods.HttpPost
-import com.google.firebase.crashlytics.buildtools.reloc.org.apache.http.message.BasicNameValuePair
-import com.google.firebase.crashlytics.buildtools.reloc.org.apache.http.protocol.HTTP
+import com.renegade.applelogin.api.APIClient
 import com.renegade.applelogin.api.RetrofitAPI
-import com.renegade.applelogin.model.AppleTokenValidationResponse
-import com.renegade.applelogin.model.AuthRequest
 import com.renegade.applelogin.util.Const
 import io.jsonwebtoken.JwsHeader
 import io.jsonwebtoken.Jwts
 import io.jsonwebtoken.SignatureAlgorithm
-import retrofit2.Call
-import retrofit2.Callback
-import retrofit2.Response
-import retrofit2.Retrofit
-import retrofit2.converter.gson.GsonConverterFactory
+import kotlinx.coroutines.DelicateCoroutinesApi
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.GlobalScope
+import kotlinx.coroutines.Runnable
+import kotlinx.coroutines.launch
+import java.io.BufferedReader
 import java.io.IOException
-import java.io.UnsupportedEncodingException
+import java.io.InputStream
+import java.lang.Exception
 import java.lang.String.format
 import java.security.KeyFactory
 import java.security.NoSuchAlgorithmException
@@ -43,8 +41,10 @@ import java.util.*
 class AppleWebViewClient(
     private val appleWebView: WebView,
     private val mainActivity: MainActivity,
-    private val appledialog: Dialog
+    private val appleDialog: Dialog
 ) : RequestInspectorWebViewClient(appleWebView) {
+
+    private val usedCodeSet: HashSet<String> = HashSet()
 
     override fun onPageStarted(view: WebView, url: String, favicon: Bitmap?) {
         Log.i(TAG, "My onPageStarted. URL: $url")
@@ -65,14 +65,11 @@ class AppleWebViewClient(
             val uri = Uri.parse(bodyAsUri)
             val state = uri.getQueryParameter("state")
             val code = uri.getQueryParameter("code")
-//            if (state == stateCode.toString()) {
-            //todo do the login stuff
             Log.i(TAG, "Redirect received state: $state")
             Log.i(TAG, "Redirect received code: $code")
             if (code != null) {
                 getValidationResponseFromApple(code)
             }
-//            }
         }
         return super.shouldInterceptRequest(view, webViewRequest)
     }
@@ -80,10 +77,9 @@ class AppleWebViewClient(
     override fun onPageFinished(view: WebView?, url: String?) {
         if (url?.startsWith(Const.REDIRECT_URI) == true) {
             appleWebView.loadUrl("")
-            appledialog.dismiss()
+            appleDialog.dismiss()
         } else {
             super.onPageFinished(view, url)
-            // retrieve display dimensions
             val displayRectangle = Rect()
             val window = mainActivity.window
             window.decorView.getWindowVisibleDisplayFrame(displayRectangle)
@@ -93,66 +89,52 @@ class AppleWebViewClient(
         }
     }
 
+    @OptIn(DelicateCoroutinesApi::class)
     @RequiresApi(Build.VERSION_CODES.O)
     @Throws(IOException::class)
     private fun getValidationResponseFromApple(code: String) {
-        //TODO build it in Retrofi
-        val retrofit = Retrofit.Builder()
-            .baseUrl("https://appleid.apple.com")
-            .addConverterFactory(GsonConverterFactory.create()) // at last we are building our retrofit builder.
-            .build()
-        // below line is to create an instance for our retrofit api class.
-        val privateKey = getPrivateKey("secret/AuthKey_8283WJR7GJ.p8", "EC")
-        val retrofitAPI = retrofit.create(RetrofitAPI::class.java)
-//        val post: HttpPost = getAppleTokenValidationRequest(code, clientSecret)
-//        return sendValidationRequestToApple(post)
-        val clientSecret = getClientSecret(privateKey)
-        Log.i(TAG, "private key: $privateKey")
-        Log.i(TAG, "client secret: $clientSecret")
-        val call: Call<AppleTokenValidationResponse?>? =
-            retrofitAPI.authenticateToken(
-                Const.CLIENT_ID,
-                clientSecret,
-                code,
-                "authorization_code"
+        if (usedCodeSet.add(code)) {
+            val retrofit = APIClient.getClient()
+            val privateKey = getPrivateKey(
+                "AuthKey_X5AQH92NHL.p8",
+                "EC"
             )
-        if (call != null) {
-            return call.enqueue(object : Callback<AppleTokenValidationResponse?> {
-                override fun onResponse(
-                    call: Call<AppleTokenValidationResponse?>,
-                    response: Response<AppleTokenValidationResponse?>
-                ) {
-                    if (response.isSuccessful) {
-                        var resp = response.body()
-                        Log.i(TAG, "body: $resp")
-                    } else {
-                        Log.i(TAG, "onResponse: $response")
-                        Log.i(TAG, "onResponse: ${response.errorBody()}")
-                    }
+            val retrofitAPI = retrofit.create(RetrofitAPI::class.java)
+            val clientSecret = getClientSecret(privateKey)
+            Log.i(TAG, "private key: $privateKey")
+            Log.i(TAG, "client secret: $clientSecret")
+            GlobalScope.launch(Dispatchers.IO) {
+                val response = retrofitAPI.authenticateToken(
+                    Const.CLIENT_ID,
+                    clientSecret,
+                    code,
+                    "authorization_code"
+                )
+                if (response.isSuccessful) {
+                    Color.parseColor("#00FF00")
+                    Log.i(TAG, "data: ${response.body()}")
+                    setLoginText("You are in!", Color.parseColor("#00FF00"), 20F)
+                } else {
+                    setLoginText("Authentication failed!", Color.parseColor("#FF0000"), 20F)
+                    Log.i(TAG, "data error: ${response.errorBody()}")
                 }
-
-                override fun onFailure(call: Call<AppleTokenValidationResponse?>, t: Throwable) {
-                    Log.i(TAG, "on: failure $t")
-                }
-            })
+            }
         }
     }
 
-    @Throws(UnsupportedEncodingException::class)
-    private fun getAppleTokenValidationRequest(code: String, clientSecret: String): HttpPost {
-        val post = HttpPost("https://appleid.apple.com/auth/token")
-        val nvps: MutableList<NameValuePair> = ArrayList()
-        nvps.add(BasicNameValuePair("client_id", "com.renegade.android.login"))
-        nvps.add(BasicNameValuePair("client_secret", clientSecret))
-        nvps.add(BasicNameValuePair("code", code))
-        nvps.add(BasicNameValuePair("grant_type", "authorization_code"))
-        post.setEntity(
-            UrlEncodedFormEntity(
-                nvps,
-                HTTP.UTF_8
-            )
-        )
-        return post
+    private fun setLoginText(text: String, color: Int, size: Float) {
+        runOnUiThread(Runnable {
+            val textView: TextView = mainActivity.findViewById(R.id.loginText)
+            textView.text = text
+            textView.setTextColor(color)
+            textView.textSize = size
+        })
+    }
+
+    private fun runOnUiThread(runnable: Runnable) {
+        mainActivity.runOnUiThread {
+            runnable.run()
+        }
     }
 
     private fun getClientSecret(pKey: PrivateKey): String {
@@ -171,21 +153,13 @@ class AppleWebViewClient(
 
     @RequiresApi(Build.VERSION_CODES.O)
     @Throws(IOException::class)
-    fun getPrivateKey(filename: String?, algorithm: String?): PrivateKey {
-//        val authFileContent = String(Files.readAllBytes(Paths.get("/home/gabor/AndroidStudioProjects/AppleLogin/app/secret/AuthKey_8283WJR7GJ.p8")), Charsets.UTF_8)
-        val authFileContent: String =
-            "MIGTAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBHkwdwIBAQQgvv8pqSm1wZdQYsgT+vUY+3Zr86vR1WafAnI7YJ1ls/CgCgYIKoZIzj0DAQehRANCAATNz+hKXzTZD18ZhCoLpiAQy2cxcf1CWBsM4CcocVrPn/aUn2Beq0QfANzhSY9TlQ5pEM9LxSF8PNk6y1n5ADbQ"
-//            "-----BEGIN PRIVATE KEY-----\n" +
-//        "MIGTAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBHkwdwIBAQQgvv8pqSm1wZdQYsgT\n" +
-//                "+vUY+3Zr86vR1WafAnI7YJ1ls/CgCgYIKoZIzj0DAQehRANCAATNz+hKXzTZD18Z\n" +
-//                "hCoLpiAQy2cxcf1CWBsM4CcocVrPn/aUn2Beq0QfANzhSY9TlQ5pEM9LxSF8PNk6\n" +
-//                "y1n5ADbQ\n" +
-//                "-----END PRIVATE KEY-----";
+    fun getPrivateKey(filename: String, algorithm: String?): PrivateKey {
+        val rawPrivateKey = getRawPrivateKeyFromFile(filename)
         try {
-            val privateKey: String = authFileContent.replace("-----BEGIN PRIVATE KEY-----", "")
-                .replace("-----END PRIVATE KEY-----", "").replace("\\s+", "").replace("\\n", "")
-            val kf: KeyFactory = KeyFactory.getInstance(algorithm);
-            return kf.generatePrivate(PKCS8EncodedKeySpec(Base64.getDecoder().decode(privateKey)));
+            val privateKey: String = rawPrivateKey.replace("-----BEGIN PRIVATE KEY-----", "")
+                .replace("-----END PRIVATE KEY-----", "").replace("\\s+", "").replace("\n", "")
+            val kf: KeyFactory = KeyFactory.getInstance(algorithm)
+            return kf.generatePrivate(PKCS8EncodedKeySpec(Base64.getDecoder().decode(privateKey)))
         } catch (e: NoSuchAlgorithmException) {
             Log.e(TAG, format("Java did not support the algorithm: %s", algorithm), e)
             throw java.lang.RuntimeException("Java did not support the algorithm: %s", e)
@@ -193,5 +167,25 @@ class AppleWebViewClient(
             Log.e(TAG, "Invalid key format")
             throw java.lang.RuntimeException("Invalid key format")
         }
+    }
+
+    private fun getRawPrivateKeyFromFile(filename: String): String {
+        var inputStream: InputStream? = null
+        val content = StringBuilder()
+        try {
+            inputStream = mainActivity.baseContext.assets.open(filename)
+            val reader = BufferedReader(inputStream.reader())
+            var line = reader.readLine()
+            while (line != null) {
+                content.append(line)
+                Log.i(TAG, line)
+                line = reader.readLine()
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to read file", e)
+        } finally {
+            inputStream?.close()
+        }
+        return content.toString()
     }
 }

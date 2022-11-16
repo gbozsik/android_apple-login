@@ -23,7 +23,6 @@ class MainActivity : AppCompatActivity() {
             "${APPLE_AUTH_URL}?response_type=code%20id_token&response_mode=form_post&client_id=${CLIENT_ID}" +
                     "&scope=${SCOPE}&state=${stateCode}&redirect_uri=${REDIRECT_URI}&usePopup=true"
 
-
         val appleLogin: Button = findViewById(R.id.appleLogin)
         appleLogin.setOnClickListener { view ->
             Log.i("TAG", "onCreate: Auth url $appleAuthURLFull")

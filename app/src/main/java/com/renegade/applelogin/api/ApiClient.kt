@@ -20,6 +20,5 @@ internal object APIClient {
             .addConverterFactory(GsonConverterFactory.create())
             .client(client)
             .build()
-
     }
 }

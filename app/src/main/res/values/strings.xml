@@ -1,3 +1,5 @@
 <resources>
     <string name="app_name">AppleLogin</string>
+    <string name="please_login">Please login!</string>
+    <string name="login_with_apple">Login with apple</string>
 </resources>
